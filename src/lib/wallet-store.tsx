@@ -45,7 +45,7 @@ type WalletState = {
   email: string | null;
   address: string | null;
   isExternalWallet: boolean; // true if connected via injected
-  isDemo: boolean; // demo/sandbox mode — no real funds, simulated transactions
+  isDemo: boolean; // demo/sandbox mode: no real funds, simulated transactions
   balance: number;
   syncing: boolean;
   lastSync: number | null;
@@ -67,6 +67,7 @@ type WalletCtx = WalletState & {
   boostSync: (durationMs?: number) => void;
   addTx: (tx: Omit<Tx, "id" | "timestamp">) => Tx;
   sendUsdc: (to: string, amount: number, note?: string) => Promise<Tx>;
+  withdrawUsdc: (vault: string, amount: number, note?: string) => Promise<Tx>;
   addReminder: (r: Omit<Reminder, "id">) => void;
   removeReminder: (id: string) => void;
   addBudget: (b: Omit<BudgetCategory, "id" | "spent">) => void;
@@ -492,7 +493,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         });
       } catch (e) {
         // Fallback: some biller CAs are plain receive() contracts and don't
-        // implement ERC-20 — fall back to native value transfer.
+        // implement ERC-20, fall back to native value transfer.
         hash = await eth.request({
           method: "eth_sendTransaction",
           params: [{ from, to, value: "0x" + value.toString(16) }],
@@ -563,6 +564,94 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return tx;
   }, [state.isExternalWallet, state.address, state.isDemo, refresh, requestApproval]);
 
+  // Withdraw a previously deposited amount from a YieldVault contract on Arc Testnet.
+  const withdrawUsdc: WalletCtx["withdrawUsdc"] = useCallback(async (vault, amount, note) => {
+    const isExternal = state.isExternalWallet;
+    const from = state.address;
+    const eth = typeof window !== "undefined" ? (window as any).ethereum : null;
+    const value = parseUnits(String(amount), USDC_DECIMALS);
+
+    if (!state.isDemo && isExternal && eth && from) {
+      await ensureArcTestnet(eth);
+      const currentChain: string = await eth.request({ method: "eth_chainId" });
+      if (parseInt(currentChain, 16) !== ARC_CHAIN_ID) {
+        throw new Error("Please switch your wallet to Arc Testnet before withdrawing.");
+      }
+      const data = encodeFunctionData({
+        abi: [
+          {
+            type: "function",
+            name: "withdraw",
+            stateMutability: "nonpayable",
+            inputs: [{ name: "amount", type: "uint256" }],
+            outputs: [],
+          },
+        ] as const,
+        functionName: "withdraw",
+        args: [value],
+      });
+      const hash: string = await eth.request({
+        method: "eth_sendTransaction",
+        params: [{ from, to: vault, data }],
+      });
+      const tx: Tx = {
+        id: crypto.randomUUID(),
+        type: "receive",
+        counterparty: vault,
+        label: note || "Earn withdrawal",
+        amount: Math.abs(amount),
+        status: "pending",
+        hash,
+        timestamp: Date.now(),
+        note,
+      };
+      setState((s) => ({ ...s, txs: [tx, ...s.txs] }));
+      (async () => {
+        try {
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: hash as `0x${string}` });
+          setState((s) => ({
+            ...s,
+            txs: s.txs.map((t) =>
+              t.id === tx.id ? { ...t, status: receipt.status === "success" ? "confirmed" : "failed" } : t,
+            ),
+          }));
+        } catch {
+          setState((s) => ({ ...s, txs: s.txs.map((t) => (t.id === tx.id ? { ...t, status: "failed" } : t)) }));
+        }
+        void refresh();
+      })();
+      return tx;
+    }
+
+    const approved = await requestApproval({ to: vault, amount, note: note || "Earn withdrawal" });
+    if (!approved) {
+      const err: any = new Error("Withdrawal rejected");
+      err.shortMessage = "Withdrawal rejected";
+      throw err;
+    }
+    const hash = "0x" + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+    const tx: Tx = {
+      id: crypto.randomUUID(),
+      type: "receive",
+      counterparty: vault,
+      label: note || "Earn withdrawal",
+      amount: Math.abs(amount),
+      status: "pending",
+      hash,
+      timestamp: Date.now(),
+      note,
+    };
+    setState((s) => ({ ...s, txs: [tx, ...s.txs] }));
+    setTimeout(() => {
+      setState((s) => ({
+        ...s,
+        txs: s.txs.map((t) => (t.id === tx.id ? { ...t, status: "confirmed" } : t)),
+        balance: s.balance + Math.abs(amount),
+      }));
+    }, 1500);
+    return tx;
+  }, [state.isExternalWallet, state.address, state.isDemo, refresh, requestApproval]);
+
   const addReminder: WalletCtx["addReminder"] = useCallback((r) => {
     setState((s) => ({ ...s, reminders: [{ ...r, id: crypto.randomUUID() }, ...s.reminders] }));
   }, []);
@@ -609,13 +698,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       boostSync,
       addTx,
       sendUsdc,
+      withdrawUsdc,
       addReminder,
       removeReminder,
       addBudget,
       addSplit,
       togglePaid,
     }),
-    [state, hydrated, loginEmail, loginDemo, connectInjected, logout, refresh, startAutoSync, stopAutoSync, boostSync, addTx, sendUsdc, addReminder, removeReminder, addBudget, addSplit, togglePaid],
+    [state, hydrated, loginEmail, loginDemo, connectInjected, logout, refresh, startAutoSync, stopAutoSync, boostSync, addTx, sendUsdc, withdrawUsdc, addReminder, removeReminder, addBudget, addSplit, togglePaid],
   );
 
   return (

@@ -1,10 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Sparkles, Info, Leaf, Loader2, Wand2, CheckCircle2, ExternalLink } from "lucide-react";
+import { Sparkles, Info, Leaf, Loader2, Wand2, CheckCircle2, ExternalLink, Lock, Timer, ArrowDownToLine } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { PageHeader } from "@/components/PageHeader";
 import { useWallet, formatUsd, shortAddr } from "@/lib/wallet-store";
 import { explorerTx } from "@/lib/arc";
+import {
+  LOCK_PERIODS,
+  EARLY_EXIT_PENALTY,
+  useEarnPositions,
+  accruedYield,
+  projectedYield,
+  type EarnPosition,
+} from "@/lib/earn-positions";
 
 export const Route = createFileRoute("/earn")({
   head: () => ({
@@ -18,7 +26,7 @@ export const Route = createFileRoute("/earn")({
       { property: "og:title", content: "Earn | Yield opportunities in AC WALLET" },
       {
         property: "og:description",
-        content: "Compare APY, risk and estimated earnings on idle USDC — informational only, never financial advice.",
+        content: "Compare APY, risk and estimated earnings on idle USDC. Informational only, never financial advice.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -148,16 +156,24 @@ function buildAllocation(principal: number, appetite: Appetite): Alloc[] {
 }
 
 function EarnPage() {
-  const { balance, address, isDemo, sendUsdc, txs } = useWallet();
+  const { balance, address, isDemo, sendUsdc, withdrawUsdc, txs } = useWallet();
   const [amount, setAmount] = useState<string>("");
   const [filter, setFilter] = useState<"all" | Risk>("all");
   const [appetite, setAppetite] = useState<Appetite>("Balanced");
+  const [periodId, setPeriodId] = useState<string>("30d");
+
+  const { positions, addPosition, closePosition } = useEarnPositions();
+  const [withdrawing, setWithdrawing] = useState<string | null>(null);
+  const [withdrawMsg, setWithdrawMsg] = useState<string | null>(null);
 
   const [advice, setAdvice] = useState("");
   const [asking, setAsking] = useState(false);
   const [allocating, setAllocating] = useState(false);
   const [allocResult, setAllocResult] = useState<{ label: string; hash?: string; ok: boolean }[]>([]);
   const [allocError, setAllocError] = useState<string | null>(null);
+
+  const period = LOCK_PERIODS.find((p) => p.id === periodId) ?? LOCK_PERIODS[0]!;
+  const boosted = (apy: number) => Math.round(apy * period.boost * 100) / 100;
 
   const principal = useMemo(() => {
     const n = Number(amount);
@@ -168,8 +184,55 @@ function EarnPage() {
   const best = OPPORTUNITIES.reduce((a, b) => (b.apy > a.apy ? b : a));
   const plan = useMemo(() => buildAllocation(principal, appetite), [principal, appetite]);
   const blendedApy = plan.length
-    ? plan.reduce((s, a) => s + a.amount * a.opp.apy, 0) / Math.max(0.01, plan.reduce((s, a) => s + a.amount, 0))
+    ? (plan.reduce((s, a) => s + a.amount * a.opp.apy, 0) / Math.max(0.01, plan.reduce((s, a) => s + a.amount, 0))) *
+      period.boost
     : 0;
+
+  const active = positions.filter((p) => p.status === "active");
+  const staked = active.reduce((s, p) => s + p.principal, 0);
+  const accrued = active.reduce((s, p) => s + accruedYield(p), 0);
+
+  function recordPosition(opp: Opportunity, amt: number, hash?: string) {
+    const now = Date.now();
+    addPosition({
+      strategyId: opp.id,
+      protocol: opp.protocol,
+      emoji: opp.emoji,
+      vault: opp.vault,
+      principal: amt,
+      baseApy: opp.apy,
+      apr: boosted(opp.apy),
+      periodId: period.id,
+      periodLabel: period.label,
+      days: period.days,
+      startedAt: now,
+      unlockAt: now + period.days * 86_400_000,
+      hash,
+    });
+  }
+
+  async function withdrawPosition(p: EarnPosition) {
+    if (withdrawing) return;
+    setWithdrawing(p.id);
+    setWithdrawMsg(null);
+    const unlocked = Date.now() >= p.unlockAt;
+    const yieldNow = accruedYield(p);
+    const payout = Math.round((p.principal + (unlocked ? yieldNow : yieldNow * (1 - EARLY_EXIT_PENALTY))) * 100) / 100;
+    try {
+      await withdrawUsdc(p.vault, payout, `Earn withdrawal: ${p.protocol}`);
+      closePosition(p.id);
+      setWithdrawMsg(
+        unlocked
+          ? `${formatUsd(payout)} USDC withdrawn from ${p.protocol}: principal plus full yield.`
+          : `${formatUsd(payout)} USDC principal withdrawn from ${p.protocol}. Early exit: yield forfeited.`,
+      );
+    } catch (e: any) {
+      setWithdrawMsg(e?.shortMessage || e?.message || "Withdrawal failed.");
+    } finally {
+      setWithdrawing(null);
+    }
+  }
+
 
   function buildContext() {
     const lines = [
@@ -209,7 +272,7 @@ function EarnPage() {
         acc += decoder.decode(value, { stream: true });
         setAdvice(acc);
       }
-      if (!acc.trim()) setAdvice("I couldn't generate an answer — try again.");
+      if (!acc.trim()) setAdvice("I couldn't generate an answer. Try again.");
     } catch {
       setAdvice("Network error while reaching AC Pilot.");
     } finally {
@@ -225,7 +288,8 @@ function EarnPage() {
     try {
       for (const a of plan) {
         try {
-          const tx = await sendUsdc(a.opp.vault, a.amount, `Earn deposit · ${a.opp.protocol}`);
+          const tx = await sendUsdc(a.opp.vault, a.amount, `Earn deposit ${period.label}: ${a.opp.protocol}`);
+          recordPosition(a.opp, a.amount, tx.hash);
           setAllocResult((r) => [...r, { label: `${formatUsd(a.amount)} USDC → ${a.opp.protocol}`, hash: tx.hash, ok: true }]);
         } catch (e: any) {
           setAllocResult((r) => [...r, { label: `${a.opp.protocol}: ${e?.shortMessage || e?.message || "failed"}`, ok: false }]);
@@ -258,7 +322,7 @@ function EarnPage() {
           </div>
           <p className="mt-2 max-w-md text-xs text-white/80">
             At {best.apy}% APY on {best.protocol}, {formatUsd(principal)} USDC would be worth about{" "}
-            <strong>{formatUsd(principal * (1 + best.apy / 100))}</strong> after a year — rates are variable and not
+            <strong>{formatUsd(principal * (1 + best.apy / 100))}</strong> after a year. Rates are variable and not
             guaranteed.
           </p>
           <div className="mt-4 flex items-center gap-2">
@@ -278,6 +342,107 @@ function EarnPage() {
           </div>
         </div>
       </div>
+
+      {/* Lock period selector */}
+      <div className="mt-4 rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Lock className="h-4 w-4 text-brand" /> Staking period · APR boost
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          The longer you lock capital, the higher the APR applied on top of each strategy base rate.
+        </p>
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
+          {LOCK_PERIODS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriodId(p.id)}
+              className={`rounded-2xl px-2 py-2.5 text-center transition ${
+                periodId === p.id ? "gradient-brand text-white shadow-brand" : "bg-secondary text-secondary-foreground"
+              }`}
+            >
+              <div className="text-xs font-bold">{p.label}</div>
+              <div className="text-[10px] opacity-80">x{p.boost.toFixed(2)} APR</div>
+            </button>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center justify-between rounded-2xl bg-muted/50 px-3 py-2 text-xs">
+          <span className="text-muted-foreground">
+            Unlocks {new Date(Date.now() + period.days * 86_400_000).toLocaleDateString()}
+          </span>
+          <span className="font-semibold">
+            Best boosted APR <span className="text-brand tabular-nums">{boosted(best.apy).toFixed(2)}%</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Active positions */}
+      {active.length > 0 && (
+        <div className="mt-4 rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Timer className="h-4 w-4 text-brand" /> Your staked positions
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Staked <strong className="text-foreground">{formatUsd(staked)}</strong> · Earned{" "}
+              <strong className="text-emerald-600">{formatUsd(accrued)}</strong>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {active.map((p) => {
+              const now = Date.now();
+              const unlocked = now >= p.unlockAt;
+              const progress = Math.min(100, ((now - p.startedAt) / (p.unlockAt - p.startedAt)) * 100);
+              const y = accruedYield(p, now);
+              const payout = p.principal + (unlocked ? y : y * (1 - EARLY_EXIT_PENALTY));
+              return (
+                <div key={p.id} className="rounded-2xl border border-border/60 bg-background/70 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{p.emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold">{p.protocol}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {p.periodLabel} lock · APR {p.apr.toFixed(2)}% · target {formatUsd(projectedYield(p))} USDC
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-bold tabular-nums">{formatUsd(p.principal)}</div>
+                      <div className="text-[11px] text-emerald-600 tabular-nums">+{formatUsd(y)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full gradient-brand" style={{ width: `${progress}%` }} />
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted-foreground">
+                      {unlocked
+                        ? "Unlocked: withdraw principal plus full yield"
+                        : `Unlocks ${new Date(p.unlockAt).toLocaleDateString()}. Early exit returns principal only, no yield.`}
+                    </span>
+                    <button
+                      onClick={() => withdrawPosition(p)}
+                      disabled={withdrawing === p.id}
+                      className={`flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-semibold disabled:opacity-60 ${
+                        unlocked ? "gradient-brand text-white shadow-brand" : "bg-secondary text-secondary-foreground"
+                      }`}
+                    >
+                      {withdrawing === p.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ArrowDownToLine className="h-3.5 w-3.5" />
+                      )}
+                      Withdraw {formatUsd(payout)}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {withdrawMsg && <div className="mt-2 text-xs font-medium text-brand">{withdrawMsg}</div>}
+        </div>
+      )}
 
       {/* Risk appetite + auto allocate */}
       <div className="mt-4 rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
@@ -308,7 +473,7 @@ function EarnPage() {
             </div>
           ))}
           <div className="flex items-center justify-between border-t border-border/60 pt-1.5 font-semibold">
-            <span>Blended APY</span>
+            <span>Blended APR ({period.label} lock)</span>
             <span className="text-brand tabular-nums">{blendedApy.toFixed(2)}%</span>
           </div>
         </div>
@@ -401,7 +566,7 @@ function EarnPage() {
       {/* Opportunities */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {list.map((o) => {
-          const yearly = principal * (o.apy / 100);
+          const periodYield = (principal * (boosted(o.apy) / 100) * period.days) / 365;
           return (
             <div
               key={o.id}
@@ -420,8 +585,10 @@ function EarnPage() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-bold tabular-nums text-brand">{o.apy.toFixed(1)}%</div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">APY</div>
+                  <div className="text-lg font-bold tabular-nums text-brand">{boosted(o.apy).toFixed(1)}%</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    APR · {period.label}
+                  </div>
                 </div>
               </div>
 
@@ -432,18 +599,20 @@ function EarnPage() {
                   {o.risk} risk
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  ≈ <strong className="text-foreground">{formatUsd(yearly)}</strong> / year on {formatUsd(principal)}
+                  ≈ <strong className="text-foreground">{formatUsd(periodYield)}</strong> in {period.label} on{" "}
+                  {formatUsd(principal)}
                 </span>
               </div>
 
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
                   className={`h-full bg-gradient-to-r ${o.gradient}`}
-                  style={{ width: `${Math.min(100, (o.apy / 10) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (boosted(o.apy) / 20) * 100)}%` }}
                 />
               </div>
 
               <div className="mt-3 grid grid-cols-2 gap-2">
+
                 <button
                   onClick={() =>
                     askPilot(
@@ -460,7 +629,8 @@ function EarnPage() {
                     setAllocResult([]);
                     try {
                       const amt = Math.round(principal * 100) / 100;
-                      const tx = await sendUsdc(o.vault, amt, `Earn deposit · ${o.protocol}`);
+                      const tx = await sendUsdc(o.vault, amt, `Earn deposit ${period.label}: ${o.protocol}`);
+                      recordPosition(o, amt, tx.hash);
                       setAllocResult([{ label: `${formatUsd(amt)} USDC → ${o.protocol}`, hash: tx.hash, ok: true }]);
                     } catch (e: any) {
                       setAllocError(e?.shortMessage || e?.message || "Deposit failed.");
@@ -468,7 +638,7 @@ function EarnPage() {
                   }}
                   className="rounded-2xl gradient-brand py-2 text-xs font-semibold text-white shadow-brand"
                 >
-                  Deposit & sign
+                  Stake {period.label}
                 </button>
               </div>
             </div>
@@ -481,7 +651,7 @@ function EarnPage() {
         <p>
           All opportunities shown are informational only and are not financial advice or a recommendation. APYs are
           indicative, variable, and can change at any time. DeFi protocols carry smart-contract, market and liquidity
-          risk — you can lose funds. Always do your own research.
+          risk. You can lose funds. Always do your own research.
         </p>
       </div>
     </div>
