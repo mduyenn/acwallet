@@ -41,7 +41,7 @@ function ReceivePage() {
           {address ? <QRCodeCanvas value={address} size={220} fgColor="#9d174d" /> : <div className="grid h-[220px] w-[220px] place-items-center text-sm text-muted-foreground">No wallet</div>}
         </div>
         <div className="mt-5 text-xs text-muted-foreground">Your wallet address</div>
-        <div className="mt-1 break-all rounded-2xl bg-white/70 px-3 py-2 font-mono text-sm">{address ?? "—"}</div>
+        <div className="mt-1 break-all rounded-2xl bg-white/70 px-3 py-2 font-mono text-sm">{address ?? "N/A"}</div>
         <div className="mt-4 grid grid-cols-3 gap-2">
           <button onClick={copy} className="flex items-center justify-center gap-2 rounded-2xl bg-white py-3 text-sm font-medium shadow-sm"><Copy className="h-4 w-4" /> Copy</button>
           <button onClick={share} className="flex items-center justify-center gap-2 rounded-2xl bg-white py-3 text-sm font-medium shadow-sm"><Share2 className="h-4 w-4" /> Share</button>

@@ -29,7 +29,7 @@ export const publicClient = createPublicClient({
 
 export async function fetchUsdcBalance(address: string): Promise<number> {
   // USDC is native on Arc, so getBalance() returns the USDC balance directly.
-  // We also try the ERC-20 interface as a fallback and take the max — some
+  // We also try the ERC-20 interface as a fallback and take the max. Some
   // RPCs report native balance with 18 decimals while the ERC-20 view uses 6.
   const addr = address as `0x${string}`;
   const [nativeRes, erc20Res] = await Promise.allSettled([
@@ -50,7 +50,7 @@ export async function fetchUsdcBalance(address: string): Promise<number> {
   if (nativeRes.status === "fulfilled") {
     try {
       // Native is reported in the chain's native unit. Arc treats USDC as native
-      // with 6 decimals, but some clients still return 18-decimal wei — pick the
+      // with 6 decimals, but some clients still return 18-decimal wei. Pick the
       // interpretation that matches the ERC-20 view, defaulting to 6.
       const raw = nativeRes.value as bigint;
       const as6 = Number(formatUnits(raw, USDC_DECIMALS));

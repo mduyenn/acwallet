@@ -1,6 +1,6 @@
 import { Link, Outlet, useRouterState, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
-import { Home, Send, QrCode, Receipt, User, LayoutDashboard, Wallet, PieChart, Bell, Users, Sparkles, Leaf } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Home, Send, QrCode, Receipt, User, LayoutDashboard, Wallet, PieChart, Bell, Users, Sparkles, Leaf, Grid3X3, X } from "lucide-react";
 import { useWallet } from "@/lib/wallet-store";
 import acWalletLogo from "@/assets/ac-wallet-icon.png.asset.json";
 
@@ -10,7 +10,7 @@ const navItems: NavItem[] = [
   { to: "/scan", label: "Scan", icon: QrCode },
   { to: "/pilot", label: "Pilot", icon: Sparkles, primary: true },
   { to: "/earn", label: "Earn", icon: Leaf },
-  { to: "/profile", label: "Profile", icon: User },
+  { to: "__more", label: "More", icon: Grid3X3 },
 ];
 
 const sideItems: { to: string; label: string; icon: typeof Home }[] = [
@@ -33,6 +33,12 @@ export function AppShell() {
   const { address, email, hydrated, isDemo, startAutoSync, stopAutoSync } = useWallet();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [path]);
+
 
   useEffect(() => {
     if (hydrated && !address && !email && path !== "/auth") {
@@ -50,7 +56,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-page">
       {isDemo && (
         <div className="sticky top-0 z-50 bg-amber-500/95 px-4 py-1.5 text-center text-[11px] font-semibold text-amber-950">
           Demo mode · sandbox balance, simulated transactions
@@ -127,6 +133,21 @@ export function AppShell() {
                 </Link>
               );
             }
+            if (item.to === "__more") {
+              return (
+                <button
+                  key="more"
+                  type="button"
+                  onClick={() => setMoreOpen(true)}
+                  className={`flex min-w-0 flex-col items-center gap-1 rounded-2xl px-1 py-1.5 text-[11px] font-semibold transition ${
+                    moreOpen ? "text-brand" : "text-muted-foreground"
+                  }`}
+                >
+                  <Icon className="h-[22px] w-[22px]" />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              );
+            }
             return (
               <Link
                 key={item.to}
@@ -142,6 +163,57 @@ export function AppShell() {
           })}
         </div>
       </nav>
+
+      {/* Mobile full menu */}
+      {moreOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            aria-label="Close menu"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setMoreOpen(false)}
+          />
+          <div
+            className="absolute inset-x-0 bottom-0 rounded-t-[28px] border-t border-border bg-background p-5 shadow-card"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)" }}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-lg font-bold">All features</div>
+              <button
+                onClick={() => setMoreOpen(false)}
+                aria-label="Close"
+                className="grid h-9 w-9 place-items-center rounded-full bg-secondary text-secondary-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {sideItems.map((item) => {
+                const Icon = item.icon;
+                const active = path === item.to;
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to as string}
+                    onClick={() => setMoreOpen(false)}
+                    className="flex flex-col items-center gap-2 rounded-2xl p-2 text-center"
+                  >
+                    <span
+                      className={`grid h-12 w-12 place-items-center rounded-2xl ${
+                        active ? "gradient-brand text-white shadow-brand" : "bg-secondary text-foreground"
+                      }`}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <span className="w-full truncate text-[11px] font-semibold text-muted-foreground">
+                      {item.label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -115,7 +115,7 @@ function AuthPage() {
     setSending(false);
     if (error) {
       if (mode === "signin" && /signups not allowed|not found|user/i.test(error.message)) {
-        toast.error("No account for this email — tap Sign up to create one");
+        toast.error("No account for this email. Tap Sign up to create one");
       } else {
         toast.error(error.message);
       }
@@ -123,7 +123,7 @@ function AuthPage() {
     }
     toast.success(
       mode === "signup"
-        ? "Account created — we sent a 6-digit code to your email (valid 5 minutes)"
+        ? "Account created. We sent a 6-digit code to your email (valid 5 minutes)"
         : "We sent a 6-digit code to your email (valid 5 minutes)",
     );
     setOtp("");
@@ -137,7 +137,7 @@ function AuthPage() {
       return;
     }
     if (secondsLeft <= 0) {
-      toast.error("Code expired — request a new one");
+      toast.error("Code expired. Request a new one");
       return;
     }
     setVerifying(true);
@@ -165,7 +165,7 @@ function AuthPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden text-white">
-      {/* AC WALLET gradient background — purple to cyan */}
+      {/* AC WALLET gradient background: purple to cyan */}
       <motion.div
         key={theme.id}
         initial={{ opacity: 0 }}
@@ -276,7 +276,7 @@ function AuthPage() {
               <button
                 onClick={() => {
                   loginDemo();
-                  toast.success("Demo mode — sandbox funds, no real money");
+                  toast.success("Demo mode: sandbox funds, no real money");
                   navigate({ to: "/" });
                 }}
                 className="group flex w-full items-center justify-between rounded-2xl bg-white/10 px-5 py-4 text-white backdrop-blur-md ring-1 ring-white/25 transition hover:bg-white/15"
@@ -384,7 +384,7 @@ function AuthPage() {
                     </span>
                   </>
                 ) : (
-                  <span className="text-destructive">Code expired — request a new one</span>
+                  <span className="text-destructive">Code expired. Request a new one</span>
                 )}
               </div>
               <button
@@ -406,7 +406,7 @@ function AuthPage() {
               </button>
               <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 p-3 text-[11px] text-emerald-800">
                 <Sparkles className="h-3.5 w-3.5" /> Enter the 6-digit code, or just tap the link in the
-                email — this page signs you in automatically.
+                email. This page signs you in automatically.
               </div>
             </div>
           )}

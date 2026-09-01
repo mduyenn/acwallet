@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, Send, ShieldAlert, TrendingUp, PieChart, RefreshCw } from "lucide-react";
+import { Sparkles, Send, ShieldAlert, TrendingUp, PieChart, RefreshCw, Check, ShieldCheck, Loader2, Leaf, ArrowRight, QrCode, Receipt, Users } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { PageHeader } from "@/components/PageHeader";
 import { useWallet, formatUsd, shortAddr } from "@/lib/wallet-store";
@@ -30,6 +30,31 @@ export const Route = createFileRoute("/pilot")({
 
 type Msg = { role: "user" | "assistant"; content: string };
 
+type Intent = "transfer" | "earn" | "receive" | "scan" | "bills" | "split" | null;
+
+function detectIntent(text: string): Intent {
+  const t = text.toLowerCase();
+  if (/(chuyển tiền|chuyen tien|chuyển|gửi tiền|gui tien|transfer|send (usdc|money|to)|thanh toán cho ví|địa chỉ ví)/.test(t))
+    return "transfer";
+  if (/(earn|yield|lãi|lai suat|lãi suất|staking|stake|apr|apy|chiến lược|chien luoc|đầu tư|dau tu|pool)/.test(t))
+    return "earn";
+  if (/(nhận tiền|nhan tien|receive|qr của tôi|my qr)/.test(t)) return "receive";
+  if (/(quét|quet|scan)/.test(t)) return "scan";
+  if (/(hóa đơn|hoa don|bill|điện|nước|internet)/.test(t)) return "bills";
+  if (/(chia tiền|chia bill|split)/.test(t)) return "split";
+  return null;
+}
+
+function extractAddress(text: string): string {
+  const m = text.match(/0x[a-fA-F0-9]{40}/);
+  return m ? m[0] : "";
+}
+
+function extractAmount(text: string): string {
+  const m = text.match(/(\d+(?:[.,]\d+)?)\s*(usdc|usd|\$)?/i);
+  return m ? m[1].replace(",", ".") : "";
+}
+
 const SUGGESTIONS = [
   "Summarise my wallet activity this week",
   "Where is my money going?",
@@ -38,13 +63,22 @@ const SUGGESTIONS = [
 ];
 
 function PilotPage() {
-  const { address, balance, txs, budgets, isDemo, lastSync, refresh, syncing } = useWallet();
+  const { address, balance, txs, budgets, isDemo, lastSync, refresh, syncing, sendUsdc } = useWallet();
   const fetchPortfolio = useServerFn(getPortfolio);
   const [portfolio, setPortfolio] = useState<PortfolioSnapshot | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const [intent, setIntent] = useState<Intent>(null);
+  const [quickTo, setQuickTo] = useState("");
+  const [quickAmount, setQuickAmount] = useState("");
+  const [payNote, setPayNote] = useState("");
+  const [payStep, setPayStep] = useState<"recipient" | "amount" | "review" | "done">("recipient");
+  const [payError, setPayError] = useState("");
+  const [paying, setPaying] = useState(false);
+  const [payHash, setPayHash] = useState("");
 
   useEffect(() => {
     if (!address || isDemo) return;
@@ -106,6 +140,12 @@ function PilotPage() {
     setMessages([...next, { role: "assistant", content: "" }]);
     setInput("");
     setStreaming(true);
+    const detected = detectIntent(text);
+    setIntent(detected);
+    if (detected === "transfer") {
+      setQuickTo(extractAddress(text));
+      setQuickAmount(extractAmount(text));
+    }
     try {
       const res = await fetch("/api/pilot", {
         method: "POST",
@@ -127,7 +167,7 @@ function PilotPage() {
         setMessages([...next, { role: "assistant", content: acc }]);
       }
       if (!acc.trim()) {
-        setMessages([...next, { role: "assistant", content: "I couldn't generate an answer — try rephrasing." }]);
+        setMessages([...next, { role: "assistant", content: "I couldn't generate an answer. Try rephrasing." }]);
       }
     } catch {
       setMessages([...next, { role: "assistant", content: "Network error while reaching AC Pilot." }]);
@@ -167,7 +207,7 @@ function PilotPage() {
             <Stat label="In 30d" value={formatUsd(received30d)} />
             <Stat
               label="Portfolio"
-              value={portfolio?.available ? `$${portfolio.totalValue.toFixed(0)}` : "—"}
+              value={portfolio?.available ? `$${portfolio.totalValue.toFixed(0)}` : "N/A"}
             />
           </div>
         </div>
@@ -182,7 +222,7 @@ function PilotPage() {
             portfolio?.available
               ? `${portfolio.positions.length} positions across ${portfolio.chains.length || 1} chain(s), 24h ${portfolio.dayChangePct.toFixed(2)}%`
               : isDemo
-                ? "Demo mode — portfolio intelligence uses sandbox data."
+                ? "Demo mode: portfolio intelligence uses sandbox data."
                 : "Multi-chain data will appear once the portfolio layer returns your positions."
           }
         />
@@ -200,7 +240,7 @@ function PilotPage() {
           title="Idle assets"
           body={
             balance > 10
-              ? `${formatUsd(balance)} USDC is sitting idle — see Earn 🌱 for yield options.`
+              ? `${formatUsd(balance)} USDC is sitting idle. See Earn 🌱 for yield options.`
               : "Balance is low; top up before exploring yield."
           }
         />
@@ -242,6 +282,213 @@ function PilotPage() {
           <div ref={endRef} />
         </div>
 
+        {intent === "transfer" && (
+          <div className="mt-3 rounded-2xl border border-brand/30 bg-brand/5 p-4">
+            <div className="flex items-center gap-2 text-xs font-bold text-brand">
+              <Send className="h-4 w-4" /> Lệnh thanh toán dịch vụ trên Arc Testnet
+            </div>
+
+            <div className="mt-3 flex items-center gap-1.5">
+              {["Địa chỉ", "Số tiền", "Xác nhận"].map((s, i) => {
+                const idx = payStep === "recipient" ? 0 : payStep === "amount" ? 1 : 2;
+                const done = i < idx || payStep === "done";
+                const active = i === idx && payStep !== "done";
+                return (
+                  <div key={s} className="flex flex-1 items-center gap-1.5">
+                    <span
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                        done
+                          ? "bg-emerald-500 text-white"
+                          : active
+                            ? "gradient-brand text-white shadow-brand"
+                            : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {done ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                    </span>
+                    <span
+                      className={`truncate text-[11px] font-semibold ${active ? "text-brand" : "text-muted-foreground"}`}
+                    >
+                      {s}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {payStep === "recipient" && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Bước 1: nhập địa chỉ ví người nhận (định dạng EVM 0x..., mạng Arc Testnet).
+                </p>
+                <input
+                  value={quickTo}
+                  onChange={(e) => setQuickTo(e.target.value)}
+                  placeholder="0x... địa chỉ ví người nhận"
+                  spellCheck={false}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:ring-2 focus:ring-brand"
+                />
+                {payError && <p className="text-[11px] font-semibold text-destructive">{payError}</p>}
+                <button
+                  onClick={() => {
+                    if (!/^0x[a-fA-F0-9]{40}$/.test(quickTo.trim())) {
+                      setPayError("Địa chỉ ví không hợp lệ, cần đúng 42 ký tự bắt đầu bằng 0x.");
+                      return;
+                    }
+                    setPayError("");
+                    setPayStep("amount");
+                  }}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl gradient-brand px-4 py-2.5 text-sm font-bold text-white shadow-brand"
+                >
+                  Tiếp tục <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {payStep === "amount" && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Bước 2: nhập số tiền USDC và mô tả dịch vụ cần thanh toán.
+                </p>
+                <input
+                  value={quickAmount}
+                  onChange={(e) => setQuickAmount(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="Số tiền USDC"
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand"
+                />
+                <input
+                  value={payNote}
+                  onChange={(e) => setPayNote(e.target.value)}
+                  placeholder="Nội dung, ví dụ: Thanh toán dịch vụ Pizza"
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Số dư khả dụng: <span className="font-semibold text-foreground">{formatUsd(balance)} USDC</span>
+                </p>
+                {payError && <p className="text-[11px] font-semibold text-destructive">{payError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setPayError("");
+                      setPayStep("recipient");
+                    }}
+                    className="rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-semibold"
+                  >
+                    Quay lại
+                  </button>
+                  <button
+                    onClick={() => {
+                      const amt = Number(quickAmount.replace(",", "."));
+                      if (!amt || amt <= 0) {
+                        setPayError("Vui lòng nhập số tiền lớn hơn 0.");
+                        return;
+                      }
+                      if (amt > balance) {
+                        setPayError("Số dư không đủ để thực hiện giao dịch này.");
+                        return;
+                      }
+                      setPayError("");
+                      setPayStep("review");
+                    }}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl gradient-brand px-4 py-2.5 text-sm font-bold text-white shadow-brand"
+                  >
+                    Xem lại <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {payStep === "review" && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Bước 3: kiểm tra và ký xác nhận cuối cùng bằng ví hoặc tài khoản email của bạn.
+                </p>
+                <div className="rounded-xl border border-border bg-background p-3 text-sm">
+                  <Row label="Người nhận" value={quickTo} mono />
+                  <Row label="Số tiền" value={`${Number(quickAmount.replace(",", ".")).toFixed(2)} USDC`} />
+                  <Row label="Nội dung" value={payNote || "Thanh toán dịch vụ"} />
+                  <Row label="Mạng" value={isDemo ? "Sandbox demo" : "Arc Testnet (5042002)"} />
+                </div>
+                {payError && <p className="text-[11px] font-semibold text-destructive">{payError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    disabled={paying}
+                    onClick={() => setPayStep("amount")}
+                    className="rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
+                  >
+                    Sửa
+                  </button>
+                  <button
+                    disabled={paying}
+                    onClick={async () => {
+                      setPaying(true);
+                      setPayError("");
+                      try {
+                        const tx = await sendUsdc(
+                          quickTo.trim(),
+                          Number(quickAmount.replace(",", ".")),
+                          payNote || "Thanh toán dịch vụ",
+                        );
+                        setPayHash(tx.hash ?? "");
+                        setPayStep("done");
+                      } catch (e) {
+                        setPayError(e instanceof Error ? e.message : "Giao dịch bị hủy hoặc thất bại.");
+                      } finally {
+                        setPaying(false);
+                      }
+                    }}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl gradient-brand px-4 py-2.5 text-sm font-bold text-white shadow-brand disabled:opacity-60"
+                  >
+                    {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    {paying ? "Đang chờ ký..." : "Ký & thanh toán"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {payStep === "done" && (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 p-3 text-sm font-semibold text-emerald-600">
+                  <Check className="h-4 w-4" /> Thanh toán thành công
+                </div>
+                {payHash && (
+                  <p className="break-all rounded-xl border border-border bg-background p-3 font-mono text-[11px] text-muted-foreground">
+                    Tx: {payHash}
+                  </p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setPayStep("recipient");
+                      setQuickAmount("");
+                      setPayNote("");
+                      setPayHash("");
+                    }}
+                    className="flex-1 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-semibold"
+                  >
+                    Lệnh mới
+                  </button>
+                  <button
+                    onClick={() => navigate({ to: "/history" })}
+                    className="flex-1 rounded-xl gradient-brand px-4 py-2.5 text-sm font-bold text-white shadow-brand"
+                  >
+                    Xem lịch sử
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {intent && intent !== "transfer" && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-brand/30 bg-brand/5 p-3">
+            <span className="text-xs font-bold text-brand">Shortcut</span>
+            <Shortcut intent={intent} onGo={(to) => navigate({ to })} />
+          </div>
+        )}
+
+
         <div className="mt-3 flex flex-wrap gap-2">
           {SUGGESTIONS.map((s) => (
             <button
@@ -280,7 +527,7 @@ function PilotPage() {
       </div>
 
       <p className="mt-3 pb-4 text-center text-[11px] text-muted-foreground">
-        AC Pilot provides informational insights only — not financial advice. Always verify on-chain data yourself.
+        AC Pilot provides informational insights only, not financial advice. Always verify on-chain data yourself.
       </p>
     </div>
   );
@@ -302,6 +549,37 @@ function Insight({ icon, title, body }: { icon: React.ReactNode; title: string; 
         {icon} {title}
       </div>
       <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+    </div>
+  );
+}
+
+const SHORTCUTS: Record<string, { to: string; label: string; icon: typeof Leaf }> = {
+  earn: { to: "/earn", label: "Mở Earn 🌱", icon: Leaf },
+  receive: { to: "/receive", label: "Nhận tiền (QR)", icon: QrCode },
+  scan: { to: "/scan", label: "Quét mã QR", icon: QrCode },
+  bills: { to: "/bills", label: "Thanh toán hóa đơn", icon: Receipt },
+  split: { to: "/split", label: "Chia hóa đơn", icon: Users },
+};
+
+function Shortcut({ intent, onGo }: { intent: Exclude<Intent, null | "transfer">; onGo: (to: string) => void }) {
+  const item = SHORTCUTS[intent];
+  if (!item) return null;
+  const Icon = item.icon;
+  return (
+    <button
+      onClick={() => onGo(item.to)}
+      className="flex items-center gap-2 rounded-xl gradient-brand px-4 py-2 text-sm font-bold text-white shadow-brand"
+    >
+      <Icon className="h-4 w-4" /> {item.label} <ArrowRight className="h-4 w-4" />
+    </button>
+  );
+}
+
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-border/60 py-1.5 last:border-0">
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className={`text-right text-xs font-semibold ${mono ? "break-all font-mono" : ""}`}>{value}</span>
     </div>
   );
 }

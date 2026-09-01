@@ -62,7 +62,7 @@ function Home() {
       await navigator.clipboard.writeText(address);
     } catch {}
     window.open(CIRCLE_FAUCET_URL, "_blank", "noopener,noreferrer");
-    toast.success("Address copied — paste it into Circle faucet", {
+    toast.success("Address copied. Paste it into Circle faucet", {
       description:
         "Select USDC · Arc Testnet, paste your address, and confirm. Your balance will update here automatically.",
       duration: 6000,
@@ -130,7 +130,7 @@ function Home() {
               ) : (
                 <>
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                  Last sync {lastSync ? new Date(lastSync).toLocaleTimeString() : "—"}
+                  Last sync {lastSync ? new Date(lastSync).toLocaleTimeString() : "N/A"}
                 </>
               )}
             </div>
@@ -177,7 +177,7 @@ function Home() {
         <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-2xl shadow-sm">💧</div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold">Get Test USDC</div>
-          <div className="truncate text-xs text-muted-foreground">Claim free USDC from Circle Faucet — auto-sync on return</div>
+          <div className="truncate text-xs text-muted-foreground">Claim free USDC from Circle Faucet, auto-sync on return</div>
         </div>
         <ExternalLink className="h-4 w-4 text-muted-foreground" />
       </button>

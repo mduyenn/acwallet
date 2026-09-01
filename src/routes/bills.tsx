@@ -36,7 +36,7 @@ function BillsPage() {
     try {
       const tx = await sendUsdc(b.to, b.price, `${b.name} bill`);
       if (isExternalWallet && tx.hash) {
-        toast.success(`${b.name} — signed on-chain`, {
+        toast.success(`${b.name}: signed on-chain`, {
           description: "Tap to view on ArcScan",
           action: { label: "Explorer", onClick: () => window.open(explorerTx(tx.hash!), "_blank") },
         });

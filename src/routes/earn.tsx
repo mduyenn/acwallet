@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Sparkles, Info, Leaf, Loader2, Wand2, CheckCircle2, ExternalLink, Lock, Timer, ArrowDownToLine } from "lucide-react";
+import { Sparkles, Info, Leaf, Loader2, Wand2, CheckCircle2, ExternalLink, Lock, Timer, ArrowDownToLine, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { PageHeader } from "@/components/PageHeader";
 import { useWallet, formatUsd, shortAddr } from "@/lib/wallet-store";
@@ -158,12 +158,16 @@ function buildAllocation(principal: number, appetite: Appetite): Alloc[] {
 function EarnPage() {
   const { balance, address, isDemo, sendUsdc, withdrawUsdc, txs } = useWallet();
   const [amount, setAmount] = useState<string>("");
+  const [poolAmounts, setPoolAmounts] = useState<Record<string, string>>({});
+  const [poolErrors, setPoolErrors] = useState<Record<string, string>>({});
+  const [staking, setStaking] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | Risk>("all");
   const [appetite, setAppetite] = useState<Appetite>("Balanced");
   const [periodId, setPeriodId] = useState<string>("30d");
 
   const { positions, addPosition, closePosition } = useEarnPositions();
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
+  const [positionsOpen, setPositionsOpen] = useState(false);
   const [withdrawMsg, setWithdrawMsg] = useState<string | null>(null);
 
   const [advice, setAdvice] = useState("");
@@ -345,10 +349,10 @@ function EarnPage() {
 
       {/* Lock period selector */}
       <div className="mt-4 rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Lock className="h-4 w-4 text-brand" /> Staking period · APR boost
+        <div className="flex items-center gap-2 text-base font-bold">
+          <Lock className="h-5 w-5 text-brand" /> Staking period · APR boost
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground">
           The longer you lock capital, the higher the APR applied on top of each strategy base rate.
         </p>
         <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
@@ -356,39 +360,52 @@ function EarnPage() {
             <button
               key={p.id}
               onClick={() => setPeriodId(p.id)}
-              className={`rounded-2xl px-2 py-2.5 text-center transition ${
-                periodId === p.id ? "gradient-brand text-white shadow-brand" : "bg-secondary text-secondary-foreground"
+              className={`rounded-2xl px-2 py-3 text-center transition ${
+                periodId === p.id ? "gradient-brand text-white shadow-brand" : "bg-secondary text-secondary-foreground hover:bg-accent"
               }`}
             >
-              <div className="text-xs font-bold">{p.label}</div>
-              <div className="text-[10px] opacity-80">x{p.boost.toFixed(2)} APR</div>
+              <div className="text-sm font-extrabold">{p.label}</div>
+              <div className="mt-0.5 text-[11px] font-bold opacity-90">x{p.boost.toFixed(2)} APR</div>
             </button>
           ))}
         </div>
-        <div className="mt-3 flex items-center justify-between rounded-2xl bg-muted/50 px-3 py-2 text-xs">
-          <span className="text-muted-foreground">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-muted/50 px-3 py-2.5">
+          <div className="flex items-center gap-2 rounded-xl bg-brand-soft px-2.5 py-1.5 text-sm font-bold text-brand">
+            <Timer className="h-4 w-4" />
             Unlocks {new Date(Date.now() + period.days * 86_400_000).toLocaleDateString()}
-          </span>
-          <span className="font-semibold">
+          </div>
+          <span className="text-sm font-bold">
             Best boosted APR <span className="text-brand tabular-nums">{boosted(best.apy).toFixed(2)}%</span>
           </span>
         </div>
       </div>
 
-      {/* Active positions */}
+      {/* Active positions (collapsible) */}
       {active.length > 0 && (
         <div className="mt-4 rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Timer className="h-4 w-4 text-brand" /> Your staked positions
+          <button
+            onClick={() => setPositionsOpen((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <div className="flex items-center gap-2 text-base font-bold">
+              <Timer className="h-5 w-5 text-brand" /> Your staked positions
+              <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-bold text-brand">
+                {active.length}
+              </span>
             </div>
-            <div className="text-xs text-muted-foreground">
-              Staked <strong className="text-foreground">{formatUsd(staked)}</strong> · Earned{" "}
-              <strong className="text-emerald-600">{formatUsd(accrued)}</strong>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>
+                Staked <strong className="text-foreground">{formatUsd(staked)}</strong> · Earned{" "}
+                <strong className="text-emerald-600">{formatUsd(accrued)}</strong>
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 transition-transform ${positionsOpen ? "rotate-180" : ""}`}
+              />
             </div>
-          </div>
+          </button>
 
-          <div className="mt-3 space-y-2">
+          {positionsOpen && (
+          <div className="mt-3 space-y-3">
             {active.map((p) => {
               const now = Date.now();
               const unlocked = now >= p.unlockAt;
@@ -398,35 +415,44 @@ function EarnPage() {
               return (
                 <div key={p.id} className="rounded-2xl border border-border/60 bg-background/70 p-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">{p.emoji}</span>
+                    <span className="text-xl">{p.emoji}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold">{p.protocol}</div>
-                      <div className="text-[11px] text-muted-foreground">
-                        {p.periodLabel} lock · APR {p.apr.toFixed(2)}% · target {formatUsd(projectedYield(p))} USDC
+                      <div className="truncate text-base font-bold">{p.protocol}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="rounded-lg bg-brand-soft px-2 py-0.5 font-bold text-brand">{p.periodLabel} lock</span>
+                        <span>APR {p.apr.toFixed(2)}%</span>
+                        <span>target {formatUsd(projectedYield(p))} USDC</span>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm font-bold tabular-nums">{formatUsd(p.principal)}</div>
-                      <div className="text-[11px] text-emerald-600 tabular-nums">+{formatUsd(y)}</div>
+                      <div className="text-base font-bold tabular-nums">{formatUsd(p.principal)}</div>
+                      <div className="text-xs font-bold text-emerald-600 tabular-nums">+{formatUsd(y)}</div>
                     </div>
                   </div>
 
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
                     <div className="h-full gradient-brand" style={{ width: `${progress}%` }} />
                   </div>
 
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-muted-foreground">
-                      {unlocked
-                        ? "Unlocked: withdraw principal plus full yield"
-                        : `Unlocks ${new Date(p.unlockAt).toLocaleDateString()}. Early exit returns principal only, no yield.`}
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    {unlocked ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500/15 px-2.5 py-1.5 text-xs font-bold text-emerald-600">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Unlocked: withdraw principal plus full yield
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-xl bg-brand-soft px-2.5 py-1.5 text-xs font-bold text-brand">
+                        <Timer className="h-3.5 w-3.5" />
+                        Unlocks {new Date(p.unlockAt).toLocaleDateString()}
+                      </span>
+                    )}
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      Early exit returns principal only, no yield.
                     </span>
                     <button
                       onClick={() => withdrawPosition(p)}
                       disabled={withdrawing === p.id}
-                      className={`flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-semibold disabled:opacity-60 ${
-                        unlocked ? "gradient-brand text-white shadow-brand" : "bg-secondary text-secondary-foreground"
-                      }`}
+                      className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-rose-500 to-red-600 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-rose-500/25 transition hover:from-rose-600 hover:to-red-700 hover:shadow-rose-500/40 disabled:opacity-60"
                     >
                       {withdrawing === p.id ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -440,21 +466,22 @@ function EarnPage() {
               );
             })}
           </div>
-          {withdrawMsg && <div className="mt-2 text-xs font-medium text-brand">{withdrawMsg}</div>}
+          )}
+          {withdrawMsg && <div className="mt-2 text-sm font-bold text-brand">{withdrawMsg}</div>}
         </div>
       )}
 
       {/* Risk appetite + auto allocate */}
       <div className="mt-4 rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Sparkles className="h-4 w-4 text-brand" /> Pilot strategy · risk appetite
+        <div className="flex items-center gap-2 text-base font-bold">
+          <Sparkles className="h-5 w-5 text-brand" /> Pilot strategy · risk appetite
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {(["Conservative", "Balanced", "Adventurous"] as Appetite[]).map((a) => (
             <button
               key={a}
               onClick={() => setAppetite(a)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+              className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
                 appetite === a ? "gradient-brand text-white shadow-brand" : "bg-secondary text-secondary-foreground"
               }`}
             >
@@ -463,16 +490,16 @@ function EarnPage() {
           ))}
         </div>
 
-        <div className="mt-3 space-y-1.5 rounded-2xl bg-muted/50 p-3 text-xs">
+        <div className="mt-3 space-y-1.5 rounded-2xl bg-muted/50 p-3 text-sm">
           {plan.map((a) => (
             <div key={a.opp.id} className="flex items-center justify-between gap-2">
               <span className="truncate">
-                {a.opp.emoji} {a.opp.protocol} · <span className={`font-semibold`}>{a.opp.risk}</span>
+                {a.opp.emoji} {a.opp.protocol} · <span className={`font-bold`}>{a.opp.risk}</span>
               </span>
-              <span className="font-semibold tabular-nums">{formatUsd(a.amount)} USDC</span>
+              <span className="font-bold tabular-nums">{formatUsd(a.amount)} USDC</span>
             </div>
           ))}
-          <div className="flex items-center justify-between border-t border-border/60 pt-1.5 font-semibold">
+          <div className="flex items-center justify-between border-t border-border/60 pt-1.5 font-bold">
             <span>Blended APR ({period.label} lock)</span>
             <span className="text-brand tabular-nums">{blendedApy.toFixed(2)}%</span>
           </div>
@@ -566,7 +593,11 @@ function EarnPage() {
       {/* Opportunities */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {list.map((o) => {
-          const periodYield = (principal * (boosted(o.apy) / 100) * period.days) / 365;
+          const raw = poolAmounts[o.id] ?? "";
+          const poolAmt = Number(raw);
+          const validAmt = Number.isFinite(poolAmt) && poolAmt > 0 ? poolAmt : 0;
+          const periodYield = (validAmt * (boosted(o.apy) / 100) * period.days) / 365;
+          const err = poolErrors[o.id];
           return (
             <div
               key={o.id}
@@ -579,29 +610,54 @@ function EarnPage() {
                   {o.emoji}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">{o.protocol}</div>
+                  <div className="truncate text-base font-bold">{o.protocol}</div>
                   <div className="text-xs text-muted-foreground">
                     {o.asset} · {o.chain}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-bold tabular-nums text-brand">{boosted(o.apy).toFixed(1)}%</div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <div className="text-2xl font-extrabold tabular-nums text-brand">{boosted(o.apy).toFixed(1)}%</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                     APR · {period.label}
                   </div>
                 </div>
               </div>
 
-              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{o.what}</p>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{o.what}</p>
 
               <div className="mt-3 flex items-center justify-between gap-2">
-                <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${riskStyle[o.risk]}`}>
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${riskStyle[o.risk]}`}>
                   {o.risk} risk
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  ≈ <strong className="text-foreground">{formatUsd(periodYield)}</strong> in {period.label} on{" "}
-                  {formatUsd(principal)}
-                </span>
+              </div>
+
+              {/* Per-pool amount input + inline APR calc */}
+              <div className="mt-3 rounded-2xl border border-border/60 bg-muted/40 p-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    inputMode="decimal"
+                    value={raw}
+                    onChange={(e) => {
+                      setPoolAmounts((m) => ({ ...m, [o.id]: e.target.value }));
+                      setPoolErrors((m) => ({ ...m, [o.id]: "" }));
+                    }}
+                    placeholder="Enter USDC amount"
+                    className={`w-full rounded-xl bg-background px-3 py-2 text-sm font-bold tabular-nums outline-none ring-1 transition focus:ring-2 ${
+                      err ? "ring-rose-400 focus:ring-rose-500" : "ring-border/60 focus:ring-brand"
+                    }`}
+                  />
+                  <span className="shrink-0 text-xs font-bold text-muted-foreground">USDC</span>
+                </div>
+                {err ? (
+                  <div className="mt-1.5 text-[11px] font-bold text-rose-600">{err}</div>
+                ) : validAmt > 0 ? (
+                  <div className="mt-1.5 flex items-center justify-between text-[11px] font-bold">
+                    <span className="text-muted-foreground">
+                      {boosted(o.apy).toFixed(2)}% APR · {period.label}
+                    </span>
+                    <span className="text-emerald-600 tabular-nums">≈ +{formatUsd(periodYield)} USDC</span>
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -625,20 +681,31 @@ function EarnPage() {
                 </button>
                 <button
                   onClick={async () => {
+                    if (staking) return;
+                    const n = Number(poolAmounts[o.id] ?? "");
+                    if (!poolAmounts[o.id]?.trim() || !Number.isFinite(n) || n <= 0) {
+                      setPoolErrors((m) => ({ ...m, [o.id]: "Please enter an amount greater than 0." }));
+                      return;
+                    }
                     setAllocError(null);
                     setAllocResult([]);
+                    setStaking(o.id);
                     try {
-                      const amt = Math.round(principal * 100) / 100;
+                      const amt = Math.round(n * 100) / 100;
                       const tx = await sendUsdc(o.vault, amt, `Earn deposit ${period.label}: ${o.protocol}`);
                       recordPosition(o, amt, tx.hash);
                       setAllocResult([{ label: `${formatUsd(amt)} USDC → ${o.protocol}`, hash: tx.hash, ok: true }]);
+                      setPoolAmounts((m) => ({ ...m, [o.id]: "" }));
                     } catch (e: any) {
-                      setAllocError(e?.shortMessage || e?.message || "Deposit failed.");
+                      setPoolErrors((m) => ({ ...m, [o.id]: e?.shortMessage || e?.message || "Deposit failed." }));
+                    } finally {
+                      setStaking(null);
                     }
                   }}
-                  className="rounded-2xl gradient-brand py-2 text-xs font-semibold text-white shadow-brand"
+                  disabled={staking === o.id}
+                  className="rounded-2xl gradient-brand py-2 text-xs font-semibold text-white shadow-brand disabled:opacity-60"
                 >
-                  Stake {period.label}
+                  {staking === o.id ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : `Stake ${period.label}`}
                 </button>
               </div>
             </div>

@@ -117,6 +117,11 @@
   --gradient-brand: linear-gradient(135deg, oklch(0.62 0.24 350) 0%, oklch(0.55 0.24 295) 50%, oklch(0.65 0.18 240) 100%);
   --gradient-card: linear-gradient(135deg, oklch(0.65 0.26 350) 0%, oklch(0.5 0.24 310) 100%);
   --gradient-soft: linear-gradient(135deg, oklch(0.97 0.04 340) 0%, oklch(0.96 0.04 290) 100%);
+  --gradient-page:
+    radial-gradient(ellipse 90% 60% at 10% 5%, oklch(0.7 0.18 350 / 0.14) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 70% at 90% 15%, oklch(0.6 0.18 295 / 0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 90% 55% at 50% 100%, oklch(0.7 0.16 240 / 0.10) 0%, transparent 55%),
+    linear-gradient(180deg, var(--background) 0%, oklch(0.97 0.02 320) 50%, var(--background) 100%);
   --shadow-brand: 0 10px 40px -10px oklch(0.62 0.24 350 / 0.4);
   --shadow-card: 0 20px 50px -20px oklch(0.5 0.24 310 / 0.35);
 }
@@ -166,6 +171,12 @@
   --gradient-brand: linear-gradient(135deg, oklch(0.7 0.24 350) 0%, oklch(0.6 0.24 295) 50%, oklch(0.7 0.18 240) 100%);
   --gradient-card: linear-gradient(135deg, oklch(0.55 0.26 340) 0%, oklch(0.4 0.22 295) 100%);
   --gradient-soft: linear-gradient(135deg, oklch(0.28 0.08 340) 0%, oklch(0.26 0.08 290) 100%);
+  --gradient-page:
+    radial-gradient(ellipse 90% 60% at 10% 5%, oklch(0.55 0.22 350 / 0.22) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 70% at 90% 15%, oklch(0.45 0.2 295 / 0.20) 0%, transparent 55%),
+    radial-gradient(ellipse 90% 55% at 50% 100%, oklch(0.5 0.18 240 / 0.16) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 50% 45%, oklch(0.35 0.12 320 / 0.12) 0%, transparent 55%),
+    linear-gradient(180deg, oklch(0.16 0.03 320) 0%, oklch(0.18 0.05 320) 50%, oklch(0.16 0.03 320) 100%);
   --shadow-brand: 0 10px 40px -10px oklch(0.7 0.24 350 / 0.5);
   --shadow-card: 0 20px 50px -20px oklch(0.55 0.26 340 / 0.5);
 }
@@ -199,6 +210,9 @@
 @utility gradient-soft {
   background-image: var(--gradient-soft);
 }
+@utility gradient-page {
+  background-image: var(--gradient-page);
+}
 @utility shadow-brand {
   box-shadow: var(--shadow-brand);
 }
@@ -209,6 +223,11 @@
   background-color: color-mix(in oklab, white 65%, transparent);
   backdrop-filter: blur(20px);
   border: 1px solid color-mix(in oklab, white 50%, transparent);
+
+  .dark & {
+    background-color: color-mix(in oklab, var(--card) 82%, transparent);
+    border-color: color-mix(in oklab, white 10%, transparent);
+  }
 }
 @utility glass-dark {
   background-color: color-mix(in oklab, white 12%, transparent);
